@@ -1,0 +1,23 @@
+# Prod overrides for nha-monitoring
+kube-prometheus-stack:
+  prometheus:
+    prometheusSpec:
+      retention: 30d
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            resources:
+              requests:
+                storage: 100Gi
+  grafana:
+    persistence:
+      size: 20Gi
+
+loki-stack:
+  loki:
+    persistence:
+      enabled: false
+    config:
+      storage_config:
+        aws:
+          s3: "s3://us-east-1/easyshop-prod-logs-bucket"

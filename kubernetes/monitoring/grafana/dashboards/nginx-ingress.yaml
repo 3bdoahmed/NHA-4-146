@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: careerio-dashboard-nginx-ingress
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  nginx-ingress.json: |
+    {
+      "title": "Nginx Ingress Controller Metrics",
+      "panels": [
+        {
+          "title": "Request Rate (RPS)",
+          "type": "timeseries",
+          "targets": [{ "expr": "sum(rate(nginx_ingress_controller_requests[5m])) by (ingress)" }]
+        },
+        {
+          "title": "Error Rate (5xx %)",
+          "type": "timeseries",
+          "targets": [{ "expr": "sum(rate(nginx_ingress_controller_requests{status=~\"5..\"}[5m])) / sum(rate(nginx_ingress_controller_requests[5m])) * 100" }]
+        },
+        {
+          "title": "Request Latency (P95)",
+          "type": "timeseries",
+          "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(nginx_ingress_controller_request_duration_seconds_bucket[5m])) by (le))" }]
+        }
+      ]
+    }

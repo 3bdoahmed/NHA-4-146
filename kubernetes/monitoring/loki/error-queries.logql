@@ -1,0 +1,15 @@
+# ==============================================================================
+# LogQL Queries Cheat Sheet for Web App Observability Stack
+# ==============================================================================
+
+# 1. Fetch all error and warning logs from the application namespace:
+{namespace="monitoring"} |~ "(?i)(error|fail|warning)"
+
+# 2. Inspect logs specifically from the EasyShop frontend application:
+{namespace="monitoring", app="easyshop"} |= "error"
+
+# 3. Count error occurrences per minute for the application:
+sum by (app) (count_over_time({namespace="monitoring", app="easyshop"} |= "error"[1m]))
+
+# 4. Track a specific request trace through the system:
+{namespace="monitoring"} |= "traceId" |= "TRACE_ID_HERE"

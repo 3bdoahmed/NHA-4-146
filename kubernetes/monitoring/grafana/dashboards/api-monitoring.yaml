@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: careerio-dashboard-api
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  api-monitoring.json: |
+    {
+      "title": "API Monitoring (RED Metrics)",
+      "panels": [
+        {
+          "title": "Request Rate (RPS)",
+          "type": "timeseries",
+          "targets": [{ "expr": "sum(rate(http_requests_total[5m])) by (job)" }]
+        },
+        {
+          "title": "Error Rate (%)",
+          "type": "timeseries",
+          "targets": [{ "expr": "job:http_requests_error_rate:percentage" }]
+        },
+        {
+          "title": "P95 Latency",
+          "type": "timeseries",
+          "targets": [{ "expr": "job:http_request_duration:p95" }]
+        }
+      ]
+    }

@@ -1,0 +1,127 @@
+# ==============================================================================
+# Monitoring Umbrella Chart Default Values Configuration
+# ==============================================================================
+
+# Default configurations for the Prometheus Stack
+kube-prometheus-stack:
+  enabled: true
+
+  prometheus:
+    prometheusSpec:
+      retention: 15d
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 20Gi
+
+      # Additional scrape configurations for service discovery in EKS
+      additionalScrapeConfigs:
+        - job_name: 'easyshop'
+          kubernetes_sd_configs:
+            - role: pod
+          relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_label_app]
+              action: keep
+              regex: easyshop-frontend|frontend|easyshop
+            - source_labels: [__meta_kubernetes_pod_container_port_number]
+              action: keep
+              regex: "3000|8080|80"
+            - source_labels: [__meta_kubernetes_namespace]
+              target_label: namespace
+            - source_labels: [__meta_kubernetes_pod_name]
+              target_label: pod
+
+        - job_name: 'mongodb'
+          kubernetes_sd_configs:
+            - role: pod
+          relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_label_app]
+              action: keep
+              regex: .*mongodb.*
+            - source_labels: [__meta_kubernetes_pod_container_port_number]
+              action: keep
+              regex: "9216|27017"
+            - source_labels: [__meta_kubernetes_namespace]
+              target_label: namespace
+            - source_labels: [__meta_kubernetes_pod_name]
+              target_label: pod
+
+        - job_name: 'nginx-ingress'
+          kubernetes_sd_configs:
+            - role: pod
+          relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+              action: keep
+              regex: ingress-nginx
+            - source_labels: [__meta_kubernetes_pod_container_port_name]
+              action: keep
+              regex: metrics
+            - source_labels: [__meta_kubernetes_namespace]
+              target_label: namespace
+            - source_labels: [__meta_kubernetes_pod_name]
+              target_label: pod
+
+  # Grafana deployment and persistent storage parameters
+  grafana:
+    enabled: true
+    adminPassword: admin # Change in production override files!
+    persistence:
+      enabled: true
+      size: 10Gi
+    sidecar:
+      dashboards:
+        enabled: true
+        label: grafana_dashboard
+        labelValues: "1"
+        searchNamespace: ALL
+      datasources:
+        enabled: true
+        searchNamespace: ALL
+
+  # Alertmanager default setup (overridden by static configuration in Kubernetes folder)
+  alertmanager:
+    enabled: true
+    config:
+      global:
+        resolve_timeout: 5m
+      route:
+        group_by: ['alertname', 'cluster', 'service']
+        group_wait: 30s
+        group_interval: 5m
+        repeat_interval: 12h
+        receiver: 'null'
+      receivers:
+      - name: 'null'
+
+# Default configurations for the Loki Stack
+loki-stack:
+  enabled: true
+  loki:
+    persistence:
+      enabled: false
+    config:
+      schema_config:
+        configs:
+          - from: "2024-04-01"
+            store: boltdb-shipper
+            object_store: s3
+            schema: v11
+            index:
+              prefix: loki_index_
+              period: 24h
+      storage_config:
+        boltdb_shipper:
+          active_index_directory: /data/loki/boltdb-shipper-active
+          cache_location: /data/loki/boltdb-shipper-cache
+          cache_ttl: 24h
+          shared_store: s3
+        aws:
+          s3: "s3://us-east-1/easyshop-logs-bucket"
+          s3forcepathstyle: true
+  promtail:
+    enabled: true
+    config:
+      lokiAddress: http://{{ .Release.Name }}-loki-stack:3100/loki/api/v1/push

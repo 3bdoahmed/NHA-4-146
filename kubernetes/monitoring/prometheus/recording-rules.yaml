@@ -1,0 +1,23 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: easyshop-recording-rules
+  namespace: monitoring
+  labels:
+    app: kube-prometheus-stack
+    release: easyshop-monitoring
+spec:
+  groups:
+  - name: api_metrics
+    rules:
+      - record: job:http_requests:rate5m
+        expr: sum by (job) (rate(http_requests_total[5m]))
+      - record: job:http_requests_error_rate:percentage
+        expr: |
+          (sum by (job) (rate(http_requests_total{status=~"5.."}[5m]))
+          / sum by (job) (rate(http_requests_total[5m]))) * 100
+      - record: job:http_request_duration:p95
+        expr: |
+          histogram_quantile(0.95,
+            sum by (job, le) (rate(http_request_duration_seconds_bucket[5m])))
+

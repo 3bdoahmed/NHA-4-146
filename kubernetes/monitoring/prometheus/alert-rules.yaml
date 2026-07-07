@@ -1,0 +1,74 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: easyshop-alert-rules
+  namespace: monitoring
+  labels:
+    app: kube-prometheus-stack
+    release: easyshop-monitoring
+spec:
+  groups:
+  - name: easyshop_infrastructure_alerts
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.instance }} is down"
+          description: "Service {{ $labels.instance }} has been down for more than 1 minute."
+
+      - alert: HighErrorRate
+        expr: job:http_requests_error_rate:percentage > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Error Rate on {{ $labels.job }}"
+          description: "Error rate on {{ $labels.job }} is above 5% (currently {{ $value | printf \"%.2f\" }}%)"
+
+      - alert: HighLatency
+        expr: job:http_request_duration:p95 > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Latency on {{ $labels.job }}"
+          description: "P95 latency on {{ $labels.job }} is above 1s (currently {{ $value | printf \"%.2f\" }}s)"
+
+      - alert: PodCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total[15m]) * 60 > 5
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is crash looping"
+          description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} has restarted more than 5 times in the last 15 minutes."
+
+      - alert: HighCPU
+        expr: (sum by (node) (rate(node_cpu_seconds_total{mode!="idle"}[5m])) / sum by (node) (rate(node_cpu_seconds_total[5m]))) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU Usage on Node {{ $labels.node }}"
+          description: "Node CPU usage is above 80% (currently {{ $value | printf \"%.2f\" }}%)"
+
+      - alert: HighMemory
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Memory Usage on Node {{ $labels.node }}"
+          description: "Node memory usage is above 85% (currently {{ $value | printf \"%.2f\" }}%)"
+
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Low Disk Space on Node {{ $labels.node }}"
+          description: "Node root partition has less than 10% space remaining (currently {{ $value | printf \"%.2f\" }}%)"
