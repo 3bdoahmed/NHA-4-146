@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: easyshop-app
+  namespace: tws-e-commerce-app
+  labels:
+    app: easyshop
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate   # create new pod at first then destroy old pod
+  selector:
+    matchLabels:
+      app: easyshop
+  template:
+    metadata:
+      labels:
+        app: easyshop
+    spec:
+#      serviceAccountName: easyshop-sa
+      containers:
+        - name: easyshop
+          image: abdelrahman678/tws-e-commerce-app:v1.0
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: easyshop-config
+            - secretRef:
+                name: easyshop-secrets
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: easyshop-service
+  namespace: tws-e-commerce-app
+  labels:
+    app: easyshop
+spec:
+  type: NodePort
+  selector:
+    app: easyshop
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      nodePort: 30080
+      protocol: TCP

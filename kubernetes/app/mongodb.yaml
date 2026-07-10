@@ -1,0 +1,92 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: easyshop-mongodb-pv
+  labels:
+    app: easyshop-mongodb  
+spec:
+  capacity:
+    storage: 5Gi
+
+  accessModes:
+    - ReadWriteOnce
+
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: manual
+  hostPath:
+    path: /mnt/data/easyshop-mongodb
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: easyshop-mongodb-pvc
+  namespace: tws-e-commerce-app
+
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: manual
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: easyshop-mongodb
+  namespace: tws-e-commerce-app
+  labels:
+    app: easyshop-mongodb
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate   # avoid two pods mounting the same RWO volume at once
+  selector:
+    matchLabels:
+      app: easyshop-mongodb
+  template:
+    metadata:
+      labels:
+        app: easyshop-mongodb
+    spec:
+      containers:
+        - name: mongodb
+          image: mongo:6.0
+          ports:
+            - name: mongodb
+              containerPort: 27017
+              protocol: TCP
+          volumeMounts:
+            - name: mongodb-data
+              mountPath: /data/db
+          readinessProbe:
+            tcpSocket:
+              port: 27017
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 27017
+            initialDelaySeconds: 15
+            periodSeconds: 20
+      volumes:
+        - name: mongodb-data
+          persistentVolumeClaim:
+            claimName: easyshop-mongodb-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: easyshop-mongodb
+  namespace: tws-e-commerce-app
+  labels:
+    app: easyshop-mongodb
+spec:
+  type: ClusterIP
+  selector:
+    app: easyshop-mongodb
+  ports:
+    - name: mongodb
+      port: 27017
+      targetPort: 27017
+      protocol: TCP

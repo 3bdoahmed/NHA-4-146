@@ -31,9 +31,9 @@ yarn-debug.log*
 yarn-error.log*
 
 # local env files
-# .env
-# .env.local
-# .env.*
+.env
+.env.local
+.env.*
 
 # vercel
 .vercel
@@ -94,4 +94,3 @@ terraform/terraform.tfstate.backup
 terra-key.pub
 terra-key
 terraform/apps/helm-values/.*
-
