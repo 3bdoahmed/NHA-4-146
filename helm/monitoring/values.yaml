@@ -132,4 +132,4 @@ loki-stack:
   promtail:
     enabled: true
     config:
-      lokiAddress: http://{{ .Release.Name }}-loki-stack:3100/loki/api/v1/push
+      lokiAddress: http://easyshop-monitoring-loki:3100/loki/api/v1/push
