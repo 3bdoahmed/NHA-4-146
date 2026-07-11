@@ -49,6 +49,15 @@ spec:
       labels:
         app: easyshop-mongodb
     spec:
+      initContainers:
+        - name: init-permissions
+          image: busybox:latest
+          command: ["sh", "-c", "chmod -R 777 /data/db"]
+          volumeMounts:
+            - name: mongodb-data
+              mountPath: /data/db
+          securityContext:
+            runAsUser: 0
       containers:
         - name: mongodb
           image: mongo:6.0
@@ -69,10 +78,32 @@ spec:
               port: 27017
             initialDelaySeconds: 15
             periodSeconds: 20
+
+        - name: mongodb-exporter
+          image: bitnami/mongodb-exporter:0.40.0
+          ports:
+            - name: metrics
+              containerPort: 9216
+              protocol: TCP
+          env:
+            - name: MONGODB_URI
+              value: "mongodb://localhost:27017"
+          readinessProbe:
+            tcpSocket:
+              port: 9216
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 9216
+            initialDelaySeconds: 15
+            periodSeconds: 20
+
       volumes:
         - name: mongodb-data
           persistentVolumeClaim:
             claimName: easyshop-mongodb-pvc
+
 ---
 apiVersion: v1
 kind: Service
@@ -89,4 +120,8 @@ spec:
     - name: mongodb
       port: 27017
       targetPort: 27017
+      protocol: TCP
+    - name: metrics
+      port: 9216
+      targetPort: 9216
       protocol: TCP

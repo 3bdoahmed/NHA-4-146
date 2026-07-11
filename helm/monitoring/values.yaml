@@ -46,7 +46,7 @@ kube-prometheus-stack:
               regex: .*mongodb.*
             - source_labels: [__meta_kubernetes_pod_container_port_number]
               action: keep
-              regex: "9216|27017"
+              regex: "9216"
             - source_labels: [__meta_kubernetes_namespace]
               target_label: namespace
             - source_labels: [__meta_kubernetes_pod_name]
