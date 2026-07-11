@@ -1,0 +1,323 @@
+# =============================================================================
+# NHA-4-146 — End-to-End Ansible Automation Playbook
+# =============================================================================
+# This playbook orchestrates post-Terraform setup:
+#   Part 1: Prerequisites on all nodes
+#   Part 2: Helm & ArgoCD installation on the Master node
+#   Part 3: Monitoring stack deployment (Prometheus, Grafana, Loki) via Helm
+#
+# Prerequisites:
+#   - ansible-galaxy collection install kubernetes.core
+#   - pip3 install kubernetes PyYAML jsonpatch
+#
+# Usage:
+#   ansible-playbook -i hosts.ini site.yml
+#   ansible-playbook -i hosts.ini site.yml -e "deploy_environment=dev"
+# =============================================================================
+
+---
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  PART 1: Prerequisites — All cluster nodes                              ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+- name: "Part 1 — Install prerequisites on all cluster nodes"
+  hosts: k8s_cluster
+  become: true
+  tasks:
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install prerequisite system packages
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - python3-pip
+          - git
+        state: present
+
+    - name: Install Python Kubernetes dependencies
+      ansible.builtin.pip:
+        name:
+          - kubernetes
+          - PyYAML
+          - jsonpatch
+        state: present
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  PART 2: Helm & ArgoCD Setup — Master node only                        ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+- name: "Part 2 — Install Helm and deploy ArgoCD on Master node"
+  hosts: master
+  become: true
+  tasks:
+
+    # ─── Helm Installation ────────────────────────────────────────────────
+    - name: Check if Helm is already installed
+      ansible.builtin.command: helm version --short
+      register: helm_check
+      changed_when: false
+      failed_when: false
+
+    - name: Download Helm install script
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        dest: /tmp/get_helm.sh
+        mode: '0700'
+      when: helm_check.rc != 0
+
+    - name: Install Helm {{ helm_version }}
+      ansible.builtin.command: /tmp/get_helm.sh --version {{ helm_version }}
+      environment:
+        DESIRED_VERSION: "{{ helm_version }}"
+      when: helm_check.rc != 0
+      register: helm_install
+      changed_when: "'is already latest' not in helm_install.stdout | default('')"
+
+    - name: Verify Helm installation
+      ansible.builtin.command: helm version --short
+      register: helm_version_output
+      changed_when: false
+
+    - name: Display Helm version
+      ansible.builtin.debug:
+        msg: "Helm installed: {{ helm_version_output.stdout }}"
+
+    # ─── Clone Repository ─────────────────────────────────────────────────
+    - name: Clone NHA-4-146 repository
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ repo_dest }}"
+        version: "{{ repo_branch }}"
+        force: yes
+
+    # ─── ArgoCD Deployment ─────────────────────────────────────────────────
+    - name: Create ArgoCD namespace
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Namespace
+        name: "{{ argocd_namespace }}"
+        state: present
+
+    - name: Deploy ArgoCD using upstream manifest
+      kubernetes.core.k8s:
+        state: present
+        namespace: "{{ argocd_namespace }}"
+        src: "{{ argocd_manifest_url }}"
+      register: argocd_deploy
+
+    - name: Wait for ArgoCD server deployment to be available
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: argocd-server
+        namespace: "{{ argocd_namespace }}"
+      register: argocd_server
+      until:
+        - argocd_server.resources | length > 0
+        - argocd_server.resources[0].status.availableReplicas | default(0) >= 1
+      retries: 30
+      delay: 10
+
+    - name: Expose ArgoCD server via NodePort (for external access)
+      kubernetes.core.k8s:
+        state: present
+        namespace: "{{ argocd_namespace }}"
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: argocd-server-nodeport
+            namespace: "{{ argocd_namespace }}"
+          spec:
+            type: NodePort
+            selector:
+              app.kubernetes.io/name: argocd-server
+            ports:
+              - name: https
+                port: 443
+                targetPort: 8080
+                nodePort: 30443
+                protocol: TCP
+
+    - name: Retrieve ArgoCD initial admin password
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: argocd-initial-admin-secret
+        namespace: "{{ argocd_namespace }}"
+      register: argocd_secret
+      until: argocd_secret.resources | length > 0
+      retries: 12
+      delay: 10
+
+    - name: Display ArgoCD admin password
+      ansible.builtin.debug:
+        msg: >
+          ArgoCD is ready!
+          URL: https://{{ ansible_host }}:30443
+          Username: admin
+          Password: {{ argocd_secret.resources[0].data.password | b64decode }}
+      when: argocd_secret.resources | length > 0
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  PART 3: Monitoring Stack — Deploy via Helm on the Master node          ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+- name: "Part 3 — Deploy Monitoring Stack (Prometheus, Grafana, Loki) via Helm"
+  hosts: master
+  become: true
+  tasks:
+
+    # ─── Namespace ─────────────────────────────────────────────────────────
+    - name: Create monitoring namespace
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Namespace
+        name: "{{ monitoring_namespace }}"
+        state: present
+
+    # ─── Add Helm Repositories ─────────────────────────────────────────────
+    - name: Add Prometheus Community Helm repository
+      kubernetes.core.helm_repository:
+        name: prometheus-community
+        repo_url: https://prometheus-community.github.io/helm-charts
+
+    - name: Add Grafana Helm repository
+      kubernetes.core.helm_repository:
+        name: grafana
+        repo_url: https://grafana.github.io/helm-charts
+
+    # ─── Build Helm Dependencies ───────────────────────────────────────────
+    - name: Build Helm chart dependencies (kube-prometheus-stack)
+      ansible.builtin.command:
+        cmd: helm dependency build
+        chdir: "{{ monitoring_chart_path }}"
+      register: helm_dep_build
+      changed_when: "'Saving' in helm_dep_build.stdout"
+
+    # ─── Deploy Prometheus + Grafana (kube-prometheus-stack) ───────────────
+    - name: "Deploy {{ monitoring_release_name }} (Prometheus + Grafana) — {{ deploy_environment }} environment"
+      kubernetes.core.helm:
+        name: "{{ monitoring_release_name }}"
+        chart_ref: "{{ monitoring_chart_path }}"
+        release_namespace: "{{ monitoring_namespace }}"
+        create_namespace: true
+        values_files:
+          - "{{ monitoring_chart_path }}/values.yaml"
+          - "{{ monitoring_chart_path }}/values-{{ deploy_environment }}.yaml"
+        wait: true
+        timeout: "10m0s"
+      register: prometheus_deploy
+
+    - name: Display Prometheus + Grafana deployment status
+      ansible.builtin.debug:
+        msg: "{{ monitoring_release_name }} (Prometheus + Grafana) deployed successfully in {{ monitoring_namespace }} namespace [{{ deploy_environment }}]"
+      when: prometheus_deploy is succeeded
+
+    # ─── Deploy Loki (log aggregation) ─────────────────────────────────────
+    - name: Deploy Loki stack for log aggregation
+      kubernetes.core.helm:
+        name: loki
+        chart_ref: grafana/loki-stack
+        release_namespace: "{{ monitoring_namespace }}"
+        create_namespace: true
+        values:
+          loki:
+            enabled: true
+            persistence:
+              enabled: true
+              size: 10Gi
+            config:
+              auth_enabled: false
+              server:
+                http_listen_port: 3100
+              common:
+                path_prefix: /loki
+                storage:
+                  filesystem:
+                    chunks_directory: /loki/chunks
+                    rules_directory: /loki/rules
+                replication_factor: 1
+                ring:
+                  kvstore:
+                    store: inmemory
+          promtail:
+            enabled: true
+            config:
+              clients:
+                - url: http://loki:3100/loki/api/v1/push
+          grafana:
+            enabled: false  # Already deployed via kube-prometheus-stack
+        wait: true
+        timeout: "10m0s"
+      register: loki_deploy
+
+    - name: Display Loki deployment status
+      ansible.builtin.debug:
+        msg: "Loki stack deployed successfully in {{ monitoring_namespace }} namespace"
+      when: loki_deploy is succeeded
+
+    # ─── Add Loki as a Grafana datasource ──────────────────────────────────
+    - name: Configure Loki as a Grafana datasource
+      kubernetes.core.k8s:
+        state: present
+        namespace: "{{ monitoring_namespace }}"
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: grafana-loki-datasource
+            namespace: "{{ monitoring_namespace }}"
+            labels:
+              grafana_datasource: "1"
+          data:
+            loki-datasource.yaml: |
+              apiVersion: 1
+              datasources:
+                - name: Loki
+                  type: loki
+                  access: proxy
+                  url: http://loki:3100
+                  isDefault: false
+                  editable: true
+
+    # ─── Final Validation ──────────────────────────────────────────────────
+    - name: Verify all monitoring pods are running
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: "{{ monitoring_namespace }}"
+        field_selectors:
+          - status.phase=Running
+      register: monitoring_pods
+      until: monitoring_pods.resources | length >= 3
+      retries: 30
+      delay: 10
+
+    - name: Display monitoring stack summary
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "  MONITORING STACK DEPLOYMENT COMPLETE"
+          - "=========================================="
+          - "Environment: {{ deploy_environment }}"
+          - "Namespace:   {{ monitoring_namespace }}"
+          - "Running pods: {{ monitoring_pods.resources | length }}"
+          - ""
+          - "Components deployed:"
+          - "  ✓ Prometheus (kube-prometheus-stack {{ '62.7.0' }})"
+          - "  ✓ Grafana (included in kube-prometheus-stack)"
+          - "  ✓ Loki + Promtail (log aggregation)"
+          - "  ✓ Loki datasource configured in Grafana"
+          - ""
+          - "Access Grafana:"
+          - "  kubectl port-forward -n {{ monitoring_namespace }} svc/{{ monitoring_release_name }}-grafana 3000:80"
+          - "  Default credentials: admin / prom-operator"
+          - ""
+          - "Access ArgoCD:"
+          - "  https://{{ ansible_host }}:30443"
+          - "=========================================="
