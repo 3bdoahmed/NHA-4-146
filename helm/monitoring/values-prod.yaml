@@ -15,11 +15,10 @@ kube-prometheus-stack:
     persistence:
       size: 20Gi
 
-loki-stack:
+loki:
   loki:
-    persistence:
-      enabled: false
-    config:
-      storage_config:
-        aws:
-          s3: "s3://us-east-1/easyshop-prod-logs-bucket"
+    storage:
+      bucketNames:
+        chunks: easyshop-prod-logs-bucket
+        ruler: easyshop-prod-logs-bucket
+        admin: easyshop-prod-logs-bucket

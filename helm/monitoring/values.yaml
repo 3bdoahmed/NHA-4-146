@@ -22,7 +22,7 @@ kube-prometheus-stack:
 
       # Additional scrape configurations for service discovery in EKS
       additionalScrapeConfigs:
-        - job_name: 'easyshop'
+        - job_name: "easyshop"
           kubernetes_sd_configs:
             - role: pod
           relabel_configs:
@@ -37,7 +37,7 @@ kube-prometheus-stack:
             - source_labels: [__meta_kubernetes_pod_name]
               target_label: pod
 
-        - job_name: 'mongodb'
+        - job_name: "mongodb"
           kubernetes_sd_configs:
             - role: pod
           relabel_configs:
@@ -52,11 +52,12 @@ kube-prometheus-stack:
             - source_labels: [__meta_kubernetes_pod_name]
               target_label: pod
 
-        - job_name: 'nginx-ingress'
+        - job_name: "nginx-ingress"
           kubernetes_sd_configs:
             - role: pod
           relabel_configs:
-            - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+            - source_labels:
+                [__meta_kubernetes_pod_label_app_kubernetes_io_name]
               action: keep
               regex: ingress-nginx
             - source_labels: [__meta_kubernetes_pod_container_port_name]
@@ -96,40 +97,55 @@ kube-prometheus-stack:
       global:
         resolve_timeout: 5m
       route:
-        group_by: ['alertname', 'cluster', 'service']
+        group_by: ["alertname", "cluster", "service"]
         group_wait: 30s
         group_interval: 5m
         repeat_interval: 12h
-        receiver: 'null'
+        receiver: "null"
       receivers:
-      - name: 'null'
+        - name: "null"
 
-# Default configurations for the Loki Stack
-loki-stack:
+# Default configurations for Loki (grafana-community/loki)
+loki:
   enabled: true
+  deploymentMode: Monolithic
+  gateway:
+    enabled: false
   loki:
+    auth_enabled: false
+    commonConfig:
+      replication_factor: 1
+    ring:
+      kvstore:
+        store: inmemory
+    schemaConfig:
+      configs:
+        - from: "2024-04-01"
+          store: tsdb
+          object_store: s3
+          schema: v13
+          index:
+            prefix: loki_index_
+            period: 24h
+    storage:
+      type: s3
+      s3:
+        endpoint: null
+        region: us-east-1
+        secretAccessKey: null
+        accessKeyId: null
+        s3ForcePathStyle: true
+      bucketNames:
+        chunks: easyshop-logs-bucket
+        ruler: easyshop-logs-bucket
+        admin: easyshop-logs-bucket
+  singleBinary:
     persistence:
       enabled: false
-    config:
-      schema_config:
-        configs:
-          - from: "2024-04-01"
-            store: boltdb-shipper
-            object_store: s3
-            schema: v11
-            index:
-              prefix: loki_index_
-              period: 24h
-      storage_config:
-        boltdb_shipper:
-          active_index_directory: /data/loki/boltdb-shipper-active
-          cache_location: /data/loki/boltdb-shipper-cache
-          cache_ttl: 24h
-          shared_store: s3
-        aws:
-          s3: "s3://us-east-1/easyshop-logs-bucket"
-          s3forcepathstyle: true
-  promtail:
-    enabled: true
-    config:
-      lokiAddress: http://easyshop-monitoring-loki:3100/loki/api/v1/push
+
+# Default configurations for Promtail (grafana/promtail)
+promtail:
+  enabled: true
+  config:
+    clients:
+      - url: http://easyshop-monitoring-loki:3100/loki/api/v1/push
