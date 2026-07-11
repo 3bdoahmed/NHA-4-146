@@ -222,6 +222,85 @@
               meta.helm.sh/release-namespace: "{{ monitoring_namespace }}"
       ignore_errors: true
 
+    # ─── Configure Kubernetes Control Plane Metrics Binding ────────────────
+    - name: Configure kube-scheduler metrics binding (bind to 0.0.0.0)
+      ansible.builtin.replace:
+        path: /etc/kubernetes/manifests/kube-scheduler.yaml
+        regexp: '--bind-address=127.0.0.1'
+        replace: '--bind-address=0.0.0.0'
+
+    - name: Configure kube-controller-manager metrics binding (bind to 0.0.0.0)
+      ansible.builtin.replace:
+        path: /etc/kubernetes/manifests/kube-controller-manager.yaml
+        regexp: '--bind-address=127.0.0.1'
+        replace: '--bind-address=0.0.0.0'
+
+    - name: Configure etcd metrics binding (bind to 0.0.0.0)
+      ansible.builtin.replace:
+        path: /etc/kubernetes/manifests/etcd.yaml
+        regexp: '--listen-metrics-urls=http://127.0.0.1:2381'
+        replace: '--listen-metrics-urls=http://0.0.0.0:2381'
+
+    - name: Get kube-proxy ConfigMap
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: ConfigMap
+        name: kube-proxy
+        namespace: kube-system
+      register: kube_proxy_config
+
+    - name: Patch kube-proxy ConfigMap for metrics binding
+      kubernetes.core.k8s:
+        state: patched
+        kind: ConfigMap
+        name: kube-proxy
+        namespace: kube-system
+        definition:
+          data:
+            config.conf: "{{ kube_proxy_config.resources[0].data['config.conf'] | replace('metricsBindAddress: 127.0.0.1:10249', 'metricsBindAddress: 0.0.0.0:10249') | replace('metricsBindAddress: \"127.0.0.1:10249\"', 'metricsBindAddress: \"0.0.0.0:10249\"') }}"
+      when: kube_proxy_config.resources | length > 0
+      register: kube_proxy_patch
+
+    - name: Restart kube-proxy DaemonSet to apply changes
+      kubernetes.core.k8s:
+        state: patched
+        kind: DaemonSet
+        name: kube-proxy
+        namespace: kube-system
+        definition:
+          spec:
+            template:
+              metadata:
+                annotations:
+                  restart_time: "{{ ansible_date_time.iso8601 }}"
+      when: kube_proxy_patch is changed
+
+    # ─── Configure metrics-server TLS verification bypass ─────────────────
+    - name: Get metrics-server deployment info
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: metrics-server
+        namespace: kube-system
+      register: metrics_server_deploy
+
+    - name: Patch metrics-server with insecure TLS flag if needed
+      kubernetes.core.k8s:
+        state: patched
+        kind: Deployment
+        name: metrics-server
+        namespace: kube-system
+        definition:
+          spec:
+            template:
+              spec:
+                containers:
+                  - name: metrics-server
+                    args: "{{ (metrics_server_deploy.resources[0].spec.template.spec.containers[0].args + ['--kubelet-insecure-tls']) | unique }}"
+      when:
+        - metrics_server_deploy.resources | length > 0
+        - "'--kubelet-insecure-tls' not in metrics_server_deploy.resources[0].spec.template.spec.containers[0].args"
+
     # ─── Deploy Static Monitoring Configs ──────────────────────────────────
     - name: Apply monitoring ResourceQuota
       kubernetes.core.k8s:

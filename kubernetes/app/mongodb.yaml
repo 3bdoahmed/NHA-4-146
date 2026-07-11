@@ -80,7 +80,7 @@ spec:
             periodSeconds: 20
 
         - name: mongodb-exporter
-          image: bitnami/mongodb-exporter:0.40.0
+          image: percona/mongodb_exporter:0.40.0
           ports:
             - name: metrics
               containerPort: 9216
