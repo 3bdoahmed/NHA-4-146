@@ -1,0 +1,26 @@
+# =============================================================================
+# Global Variables for NHA-4-146 Ansible Automation
+# =============================================================================
+
+# --- Repository Configuration ---
+repo_url: "https://github.com/nhahub/NHA-4-146.git"
+repo_dest: "/opt/NHA-4-146"
+repo_branch: "main"
+
+# --- Kubernetes Namespaces ---
+argocd_namespace: "argocd"
+monitoring_namespace: "monitoring"
+
+# --- ArgoCD Configuration ---
+argocd_manifest_url: "https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml"
+
+# --- Helm Configuration ---
+helm_version: "v3.16.1"
+
+# --- Monitoring Stack (aligned with helm/monitoring/Chart.yaml) ---
+monitoring_chart_name: "easyshop-monitoring"
+monitoring_chart_path: "{{ repo_dest }}/helm/monitoring"
+monitoring_release_name: "easyshop-monitoring"
+
+# --- Environment: set to 'dev' or 'prod' ---
+deploy_environment: "dev"
