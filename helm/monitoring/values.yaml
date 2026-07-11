@@ -7,6 +7,9 @@ kube-prometheus-stack:
   enabled: true
 
   prometheus:
+    service:
+      type: NodePort
+      nodePort: 30090
     prometheusSpec:
       retention: 15d
       storageSpec:
@@ -67,6 +70,9 @@ kube-prometheus-stack:
   # Grafana deployment and persistent storage parameters
   grafana:
     enabled: true
+    service:
+      type: NodePort
+      nodePort: 30030
     adminPassword: admin # Change in production override files!
     persistence:
       enabled: true
@@ -84,6 +90,8 @@ kube-prometheus-stack:
   # Alertmanager default setup (overridden by static configuration in Kubernetes folder)
   alertmanager:
     enabled: true
+    alertmanagerSpec:
+      configSecret: alertmanager-config-secret
     config:
       global:
         resolve_timeout: 5m
